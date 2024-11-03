@@ -44,9 +44,7 @@ class NormalizeFeatureNamesOp:
 
 
 def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
-                    split: str,
-                    *,
-                    reverse_translation: bool = False) -> tf.data.Dataset:
+                    split: str) -> tf.data.Dataset:
   """Loads a raw WMT dataset and normalizes feature keys.
 
   Args:
@@ -66,7 +64,7 @@ def get_raw_dataset(dataset_builder: tfds.core.DatasetBuilder,
   ds = dataset_builder.as_dataset(split=per_host_split, shuffle_files=False)
   ds = ds.map(
       NormalizeFeatureNamesOp(
-          dataset_builder.info, reverse_translation=reverse_translation),
+          dataset_builder.info, reverse_translation=False),
       num_parallel_calls=AUTOTUNE)
   return ds
 
@@ -318,35 +316,19 @@ def preprocess_wmt_data(dataset,
 def get_wmt_datasets(config: ml_collections.ConfigDict,
                      *,
                      n_devices: int,
-                     reverse_translation: bool = True,
-                     vocab_path: Optional[str] = None):
+                     vocab_path: str):
   """Load and return dataset of batched examples for use during training."""
-  if vocab_path is None:
-    vocab_path = os.path.expanduser('~/wmt_sentencepiece_model')
-
-  train_ds_builder = tfds.builder(config.dataset_name)
-  train_data = get_raw_dataset(
-      train_ds_builder, 'train', reverse_translation=reverse_translation)
-
-  if config.eval_dataset_name:
-    eval_ds_builder = tfds.builder(config.eval_dataset_name)
-  else:
-    eval_ds_builder = train_ds_builder
-  eval_data = get_raw_dataset(
-      eval_ds_builder,
-      config.eval_split,
-      reverse_translation=reverse_translation)
+  train_data = get_raw_dataset(tfds.builder("wmt17_translate/de-en"),"train")
+  eval_data = get_raw_dataset(tfds.builder("wmt14_translate/de-en"),"test")
 
   # Tokenize data.
   sp_tokenizer = tokenizer.load_or_train_tokenizer(
       train_data,
       vocab_path=vocab_path,
-      vocab_size=config.vocab_size,
-      max_corpus_chars=config.max_corpus_chars)
-  train_data = train_data.map(
-      tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
-  eval_data = eval_data.map(
-      tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
+      vocab_size=32000,
+      max_corpus_chars=10**7)
+  train_data = train_data.map(tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
+  eval_data = eval_data.map(tokenizer.TokenizeOp(sp_tokenizer), num_parallel_calls=AUTOTUNE)
 
   batch_size = config.per_device_batch_size * n_devices
 
